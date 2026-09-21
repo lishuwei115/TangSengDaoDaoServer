@@ -81,7 +81,7 @@ func runAPI(ctx *config.Context, stickerSearchURL string) {
 	replaceWebConfig(ctx.GetConfig())
 	// 初始化api
 	s.GetRoute().UseGin(ctx.Tracer().GinMiddle()) // 需要放在 api.Route(s.GetRoute())的前面
-	s.GetRoute().UseGin(stickerSearchProxyMiddleware(stickerSearchURL))
+	s.GetRoute().UseGin(stickerSearchProxyMiddleware(stickerSearchURL, newStickerSearchAuthenticator(ctx)))
 	s.GetRoute().UseGin(func(c *gin.Context) {
 		ingorePaths := ingorePaths()
 		for _, ingorePath := range ingorePaths {
