@@ -49,6 +49,7 @@ func main() {
 	cfg := config.New()
 	cfg.Version = Version
 	cfg.ConfigureWithViper(vp)
+	stickerSearchURL := strings.TrimSpace(vp.GetString("stickersearch.url"))
 
 	// 初始化context
 	ctx := config.NewContext(cfg)
@@ -67,12 +68,12 @@ func main() {
 	}
 
 	if serverType == "api" || serverType == "" || serverType == "config" { // api服务启动
-		runAPI(ctx)
+		runAPI(ctx, stickerSearchURL)
 	}
 
 }
 
-func runAPI(ctx *config.Context) {
+func runAPI(ctx *config.Context, stickerSearchURL string) {
 	// 创建server
 	s := server.New(ctx)
 	ctx.SetHttpRoute(s.GetRoute())
@@ -80,6 +81,7 @@ func runAPI(ctx *config.Context) {
 	replaceWebConfig(ctx.GetConfig())
 	// 初始化api
 	s.GetRoute().UseGin(ctx.Tracer().GinMiddle()) // 需要放在 api.Route(s.GetRoute())的前面
+	s.GetRoute().UseGin(stickerSearchProxyMiddleware(stickerSearchURL))
 	s.GetRoute().UseGin(func(c *gin.Context) {
 		ingorePaths := ingorePaths()
 		for _, ingorePath := range ingorePaths {
