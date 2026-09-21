@@ -31,13 +31,17 @@ func TestStickerSearchProxyMiddleware(t *testing.T) {
 	r.GET("/normal", func(c *gin.Context) {
 		c.String(http.StatusOK, "normal")
 	})
+	server := httptest.NewServer(r)
+	defer server.Close()
 
-	req := httptest.NewRequest(http.MethodGet, "/sticker-api/v1/search?q=%E5%BC%80%E5%BF%83&limit=20", nil)
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
+	resp, err := http.Get(server.URL + "/sticker-api/v1/search?q=%E5%BC%80%E5%BF%83&limit=20")
+	if err != nil {
+		t.Fatalf("proxy request failed: %v", err)
+	}
+	defer resp.Body.Close()
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusCreated)
 	}
 	if gotPath != "/v1/search" {
 		t.Fatalf("upstream path = %q, want %q", gotPath, "/v1/search")
@@ -48,19 +52,22 @@ func TestStickerSearchProxyMiddleware(t *testing.T) {
 	if gotPrefix != stickerSearchPrefix {
 		t.Fatalf("X-Forwarded-Prefix = %q, want %q", gotPrefix, stickerSearchPrefix)
 	}
-	if rec.Header().Get("X-Sticker-Upstream") != "ok" {
+	if resp.Header.Get("X-Sticker-Upstream") != "ok" {
 		t.Fatalf("upstream response header was not preserved")
 	}
-	body, _ := io.ReadAll(rec.Body)
+	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "proxied" {
 		t.Fatalf("body = %q, want %q", string(body), "proxied")
 	}
 
-	normalReq := httptest.NewRequest(http.MethodGet, "/normal", nil)
-	normalRec := httptest.NewRecorder()
-	r.ServeHTTP(normalRec, normalReq)
-	if normalRec.Code != http.StatusOK || normalRec.Body.String() != "normal" {
-		t.Fatalf("non-sticker request was affected: status=%d body=%q", normalRec.Code, normalRec.Body.String())
+	normalResp, err := http.Get(server.URL + "/normal")
+	if err != nil {
+		t.Fatalf("normal request failed: %v", err)
+	}
+	defer normalResp.Body.Close()
+	normalBody, _ := io.ReadAll(normalResp.Body)
+	if normalResp.StatusCode != http.StatusOK || string(normalBody) != "normal" {
+		t.Fatalf("non-sticker request was affected: status=%d body=%q", normalResp.StatusCode, string(normalBody))
 	}
 }
 
