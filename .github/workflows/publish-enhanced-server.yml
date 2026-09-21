@@ -1,0 +1,52 @@
+name: Build and publish enhanced TangSengDaoDaoServer
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.20'
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build linux/amd64 binary
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o linux_amd64 .
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ghcr
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/lishuwei115/tangsengdaodaoserver:enhanced
+            ghcr.io/lishuwei115/tangsengdaodaoserver:sha-${{ github.sha }}
+          provenance: false
