@@ -7,18 +7,58 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/config"
+	"github.com/TangSengDaoDao/TangSengDaoDaoServerLib/pkg/wkhttp"
 	"github.com/gin-gonic/gin"
 )
 
 const stickerSearchPrefix = "/sticker-api"
 
+type stickerSearchAuthenticator func(c *gin.Context) bool
+
+// newStickerSearchAuthenticator reuses TangSengDaoDao's existing login token
+// cache. StickerSearch therefore has no separate account/authentication system.
+func newStickerSearchAuthenticator(ctx *config.Context) stickerSearchAuthenticator {
+	return func(c *gin.Context) bool {
+		token := strings.TrimSpace(c.GetHeader("token"))
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"msg": "token不能为空，请先登录！",
+			})
+			return false
+		}
+
+		tokenInfo, err := wkhttp.GetLoginTokenInfo(
+			token,
+			ctx.GetConfig().Cache.TokenCachePrefix,
+			ctx.Cache(),
+		)
+		if err != nil || tokenInfo == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"msg": "请先登录！",
+			})
+			return false
+		}
+
+		c.Set("uid", tokenInfo.UID)
+		c.Set("name", tokenInfo.Name)
+		if tokenInfo.Role != "" {
+			c.Set("role", tokenInfo.Role)
+		}
+		return true
+	}
+}
+
 // stickerSearchProxyMiddleware proxies /sticker-api/* requests to the configured
-// StickerSearch service. When no upstream is configured, it is a no-op and the
-// existing TangSengDaoDaoServer routing behavior is unchanged.
-func stickerSearchProxyMiddleware(rawUpstream string) gin.HandlerFunc {
+// StickerSearch service. Health endpoints remain public; every other
+// StickerSearch endpoint must pass TangSengDaoDao login authentication.
+func stickerSearchProxyMiddleware(rawUpstream string, authenticate stickerSearchAuthenticator) gin.HandlerFunc {
 	rawUpstream = strings.TrimSpace(rawUpstream)
 	if rawUpstream == "" {
 		return func(c *gin.Context) {}
+	}
+	if authenticate == nil {
+		panic("StickerSearch authenticator is required")
 	}
 
 	target, err := url.Parse(rawUpstream)
@@ -32,6 +72,9 @@ func stickerSearchProxyMiddleware(rawUpstream string) gin.HandlerFunc {
 		stripStickerSearchPrefix(req.URL)
 		originalDirector(req)
 		req.Host = target.Host
+		// The application login token is only for the TangSengDaoDao gateway.
+		// Do not leak it to the internal StickerSearch service.
+		req.Header.Del("token")
 		req.Header.Set("X-Forwarded-Prefix", stickerSearchPrefix)
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
@@ -41,7 +84,12 @@ func stickerSearchProxyMiddleware(rawUpstream string) gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
-		if !isStickerSearchPath(c.Request.URL.Path) {
+		path := c.Request.URL.Path
+		if !isStickerSearchPath(path) {
+			return
+		}
+
+		if !isStickerSearchPublicPath(path) && !authenticate(c) {
 			return
 		}
 
@@ -52,6 +100,18 @@ func stickerSearchProxyMiddleware(rawUpstream string) gin.HandlerFunc {
 
 func isStickerSearchPath(path string) bool {
 	return path == stickerSearchPrefix || strings.HasPrefix(path, stickerSearchPrefix+"/")
+}
+
+func isStickerSearchPublicPath(path string) bool {
+	switch path {
+	case stickerSearchPrefix + "/health",
+		stickerSearchPrefix + "/healthz",
+		stickerSearchPrefix + "/v1/health",
+		stickerSearchPrefix + "/v1/readyz":
+		return true
+	default:
+		return false
+	}
 }
 
 func stripStickerSearchPrefix(u *url.URL) {
