@@ -13,5 +13,7 @@ RUN apt-get update && \
 
 COPY assets ./assets
 COPY configs ./configs
-COPY --chmod=0755 linux_${TARGETARCH} main
-CMD /app/main
+COPY --chmod=0755 linux_${TARGETARCH} /app/main
+
+ENTRYPOINT ["/app/main"]
+CMD ["api"]
